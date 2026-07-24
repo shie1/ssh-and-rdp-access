@@ -1,0 +1,9 @@
+{
+    "watch": "./",
+    "ext": "ts,yml,json",
+    "ignore": [
+        "node_modules/**/*",
+        ".git"
+    ],
+    "exec": "tsx index.ts"
+}
