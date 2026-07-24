@@ -63,7 +63,8 @@ const totp = new TOTP({
 const app = express()
 
 app.get("/", (req, res) => {
-    res.send("Hello World!")
+    res.header("Content-Type", "text/plain")
+    res.send(scripts.startSSH())
 })
 
 app.get("/otp", async (req, res) => {
@@ -94,7 +95,7 @@ app.get("/key", (req, res) => {
     createReadStream(sshKeyPath).pipe(res)
 })
 
-import scriptsRouter from "./scripts/scripts"
+import scriptsRouter, { scripts } from "./scripts/scripts"
 app.use("/scripts", scriptsRouter)
 
 const PORT = process.env.PORT || 3000

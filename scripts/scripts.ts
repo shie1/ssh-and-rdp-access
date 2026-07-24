@@ -4,19 +4,16 @@ import {readFileSync} from "fs"
 
 config({ quiet: true })
 
-const scripts = {
-    startSSH: readFileSync("./scripts/startSSH.ps1", "utf-8"),
+export const scripts = {
+    startSSH: () => applyEnvVariables(readFileSync("./scripts/startSSH.ps1", "utf-8")),
 }
 
-Object.keys(scripts).forEach((key) => {
-    const scriptKey = key as keyof typeof scripts
+function applyEnvVariables(scriptContent: string) {
     const envVars = {
         ENV_BASE_URL: process.env.BASE_URL!,
         ENV_TARGET: process.env.TARGET!,
         ENV_TARGET_PORT: process.env.TARGET_PORT || "22",
     }
-
-    let scriptContent = scripts[scriptKey]
 
     Object.keys(envVars).forEach((envKey) => {
         const envValue = envVars[envKey as keyof typeof envVars]
@@ -24,14 +21,14 @@ Object.keys(scripts).forEach((key) => {
         scriptContent = scriptContent.replace(regex, envValue)
     })
 
-    scripts[scriptKey] = scriptContent
-})
+    return scriptContent
+}
 
 const scriptsRouter = Router()
 
 scriptsRouter.get("/ssh", (req, res) => {
     res.header("Content-Type", "text/plain")
-    res.send(scripts.startSSH)
+    res.send(scripts.startSSH())
 })
 
 export default scriptsRouter

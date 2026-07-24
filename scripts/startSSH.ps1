@@ -53,25 +53,30 @@ if ($otp -notmatch "^\d{6}$") {
 
 $authHeader = "Bearer $password`:$otp"
 
-$tempKeyPath = Join-Path -Path $env:TEMP -ChildPath ("ssh-key-{0}.tmp" -f ([Guid]::NewGuid().ToString("N")))
+$privateKey = $null
+$tempKeyPath = Join-Path -Path $env:TEMP -ChildPath ("ssh-key-{0}.pem" -f ([Guid]::NewGuid().ToString("N")))
 
 try {
 	Write-Host "SSH kulcs letoltese..."
 
-	Invoke-WebRequest `
+	$privateKey = (Invoke-WebRequest `
 		-Uri $keyEndpoint `
 		-Method Get `
 		-Headers @{ Authorization = $authHeader } `
-		-OutFile $tempKeyPath | Out-Null
+		-UseBasicParsing).Content
 
-	# Restrict access to the current user for better key file hygiene.
-	$currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-	icacls $tempKeyPath /inheritance:r /grant:r "$currentIdentity:R" | Out-Null
+	if ([string]::IsNullOrWhiteSpace($privateKey)) {
+		throw "Ures SSH kulcs erkezett a szervertol."
+	}
+
+	Set-Content -LiteralPath $tempKeyPath -Value $privateKey -NoNewline -Encoding ascii
+
+	$sshExecutable = (Get-Command ssh.exe -ErrorAction Stop).Source
 
 	$sshArgs = @(
 		"-i", $tempKeyPath,
 		"-p", $TargetPort,
-		"-o", "IdentitiesOnly=yes",
+		"-o", "IdentityAgent=none",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"$Target"
 	)
@@ -81,7 +86,7 @@ try {
 	}
 
 	Write-Host "SSH kapcsolat inditasa: $Target"
-	& ssh @sshArgs
+	& $sshExecutable @sshArgs
 }
 catch {
 	if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
