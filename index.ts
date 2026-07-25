@@ -164,6 +164,15 @@ clearKeys() // Clear all keys on startup to ensure a clean state
 writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
 
 
+const createKeyId = (ip: string) => {
+    if (!ip) {
+        ip = "unknown"
+    }
+    readAuthorizedKeys()
+    const i = Object.keys(sshKeys).filter(keyName => keyName.startsWith(ip)).length
+    return i == 0 ? ip : `${ip}-${i}`
+}
+
 const totp = new TOTP({
     issuer: envVars.OTP_ISSUER,
     label: envVars.OTP_LABEL,
@@ -199,7 +208,7 @@ app.get("/key", (req, res) => {
     const tempDirectory = path.join(tmpdir(), "ssh-key-")
     const keyPath = `${tempDirectory}${Date.now()}`
 
-    const keyId = Date.now().toString()
+    const keyId = createKeyId(req.socket.remoteAddress || req.ip || req.headers["x-forwarded-for"] as string || "")
 
     try {
         execFileSync("ssh-keygen", ["-t", SSH_KEY_TYPE.replace('ssh-', ''), "-C", keyId, "-N", "", "-f", keyPath, "-q"])
