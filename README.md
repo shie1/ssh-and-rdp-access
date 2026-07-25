@@ -53,7 +53,7 @@ BASE_URL=http://localhost:3000 [mandatory]
 
 ### Environment variables
 
-- `SSH_KEY_PATH`: Path to the local SSH directory that contains `authorized_keys`
+- `SSH_DIR`: Path to the local SSH directory that contains `authorized_keys`
 - `PASSWORD`: Shared password used to authorize key generation
 - `OTP_CODE_ENABLED`: Enables or disables the `/otp` endpoint
 - `OTP_SECRET`: TOTP secret used to validate requests
