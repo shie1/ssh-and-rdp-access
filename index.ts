@@ -1,60 +1,138 @@
 import express from "express"
 import { config } from "dotenv"
-import { existsSync, createReadStream } from "fs"
-import { homedir } from "os"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "fs"
+import { homedir, tmpdir } from "os"
 import path from "path"
+import { execFileSync } from "child_process"
 import { TOTP } from "otpauth"
 import QR from "qrcode"
 
 config({ quiet: true })
 
-if (!process.env.TARGET) {
-    console.error("TARGET is not defined in the environment variables.")
-    process.exit(1)
-}
+const AUTHORIZED_KEYS_SEPARATOR_STRING = "# BELOW THIS LINE, KEYS ARE MANAGED BY SSH&RDP ACCESS SERVER. DO NOT MAKE EDITS BELOW THIS LINE."
+const SSH_KEY_TYPE = "ssh-ed25519"
 
-if (!process.env.PASSWORD) {
-    console.error("PASSWORD is not defined in the environment variables.")
-    process.exit(1)
-}
-
-function expandHomeDirectory(filePath: string) {
-    if (filePath === "~") {
-        return homedir()
+const expandedHomeDir = (filePath: string) => {
+    if (filePath.startsWith("~")) {
+        return path.join(homedir(), filePath.slice(1))
     }
-
-    if (filePath.startsWith("~/")) {
-        return path.join(homedir(), filePath.slice(2))
-    }
-
     return filePath
 }
 
-if (!process.env.SSH_KEY_PATH) {
-    console.error("SSH_KEY_PATH is not defined in the environment variables.")
+const envVars = {
+    SSH_DIR: expandedHomeDir(process.env.SSH_KEY_PATH || path.join(homedir(), ".ssh")),
+    PASSWORD: process.env.PASSWORD!,
+    OTP_CODE_ENABLED: process.env.OTP_CODE_ENABLED === "true",
+    OTP_SECRET: process.env.OTP_SECRET!,
+    TARGET: process.env.TARGET!,
+    TARGET_PORT: process.env.TARGET_PORT || "22",
+    RDP_PORT: process.env.RDP_PORT || "3389",
+    BASE_URL: process.env.BASE_URL!,
+    OTP_ISSUER: process.env.OTP_ISSUER || "SSH&RDP",
+    OTP_LABEL: process.env.OTP_LABEL || "Uncofigured",
+}
+
+for (const [key, value] of Object.entries(envVars)) {
+    if (value === undefined || value === "") {
+        console.error(`Environment variable ${key} is not set.`)
+        process.exit(1)
+    }
+}
+
+if (!existsSync(envVars.SSH_DIR)) {
+    console.error(`SSH directory ${envVars.SSH_DIR} does not exist.`)
     process.exit(1)
 }
 
-const sshKeyPath = expandHomeDirectory(process.env.SSH_KEY_PATH)
-
-if (!existsSync(sshKeyPath)) {
-    console.error(`SSH key file does not exist at path: ${process.env.SSH_KEY_PATH}`)
+const authorizedKeysPath = path.join(envVars.SSH_DIR, "authorized_keys")
+if (!existsSync(authorizedKeysPath)) {
+    console.error(`Authorized keys file ${authorizedKeysPath} does not exist.`)
     process.exit(1)
 }
 
-console.log(`Serving SSH key at path: ${sshKeyPath}`)
+const sshKeys: { [key: string]: string } = {}
 
-const otpSecret = process.env.OTP_SECRET
+const readAuthorizedKeys = () => {
+    (() => {
+        const ak = readFileSync(authorizedKeysPath, "utf8")
+        let foundLine = false
+        ak.split("\n").forEach((line, index) => {
+            if (line.trim() === AUTHORIZED_KEYS_SEPARATOR_STRING) {
+                foundLine = true
+            }
+        })
+        if (!foundLine) {
+            writeFileSync(authorizedKeysPath, `\n${AUTHORIZED_KEYS_SEPARATOR_STRING}`, { flag: "a" })
+            console.log(`Added separator line to ${authorizedKeysPath}`)
+        }
+    })();
 
-if (!otpSecret) {
-    console.error("OTP_SECRET is not defined in the environment variables.")
-    process.exit(1)
+
+    let active = false
+    for (const line of readFileSync(authorizedKeysPath, "utf8").split("\n")) {
+        if (line.trim() === AUTHORIZED_KEYS_SEPARATOR_STRING) {
+            active = true
+        } else if (active && !line.trim().startsWith("#") && line.trim() !== "") {
+            const parts = line.split(" ")
+            if (parts.length < 2) {
+                console.error(`Invalid key line: ${line}`)
+                continue
+            }
+            const keyData = parts[1]!
+            const keyName = parts[2]!
+            sshKeys[keyName] = keyData
+        }
+    }
 }
+
+const writeAuthorizedKeys = () => {
+    let preserve = true
+    const lines: string[] = []
+
+    for (const line of readFileSync(authorizedKeysPath, "utf8").split("\n")) {
+        if (line.trim() === AUTHORIZED_KEYS_SEPARATOR_STRING) {
+            preserve = false
+            lines.push(line)
+            continue
+        } else if (preserve) {
+            lines.push(line)
+        }
+    }
+
+    // type data key Object.keys
+    for (const keyName of Object.keys(sshKeys)) {
+        const keyData = sshKeys[keyName]!
+        lines.push(`${SSH_KEY_TYPE} ${keyData} ${keyName}`)
+    }
+
+    writeFileSync(authorizedKeysPath, lines.join("\n"), { encoding: "utf8" })
+}
+
+const deleteKey = (keyName: string) => {
+    if (sshKeys[keyName]) {
+        delete sshKeys[keyName]
+        writeAuthorizedKeys()
+        console.log(`Deleted key ${keyName}`)
+    } else {
+        console.error(`Key ${keyName} not found`)
+    }
+}
+
+const clearKeys = () => {
+    for (const keyName of Object.keys(sshKeys)) {
+        deleteKey(keyName)
+    }
+}
+
+readAuthorizedKeys() 
+clearKeys() // Clear all keys on startup to ensure a clean state
+writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
+
 
 const totp = new TOTP({
-    issuer: process.env.OTP_ISSUER || "SSH&RDP",
-    label: process.env.OTP_LABEL || "Uncofigured",
-    secret: otpSecret,
+    issuer: envVars.OTP_ISSUER,
+    label: envVars.OTP_LABEL,
+    secret: envVars.OTP_SECRET,
     algorithm: "SHA1",
     digits: 6,
     period: 30,
@@ -62,13 +140,8 @@ const totp = new TOTP({
 
 const app = express()
 
-app.get("/", (req, res) => {
-    res.header("Content-Type", "text/plain")
-    res.send(scripts.startSSH())
-})
-
 app.get("/otp", async (req, res) => {
-    if (process.env.OTP_CODE_ENABLED !== "true") {
+    if (!envVars.OTP_CODE_ENABLED) {
         res.status(403).send("OTP code generation is disabled.")
         return
     }
@@ -83,23 +156,30 @@ app.get("/otp", async (req, res) => {
 })
 
 app.get("/key", (req, res) => {
-    const expectedAuthHeader = `Bearer ${process.env.PASSWORD}:${totp.generate()}`
-    const authHeader = req.headers.authorization
+    const tempDirectory = path.join(tmpdir(), "ssh-key-")
+    const keyPath = `${tempDirectory}${Date.now()}`
 
-    if (!authHeader || authHeader !== expectedAuthHeader) {
-        res.status(401).send("Unauthorized")
-        return
+    const keyId = Date.now().toString()
+
+    try {
+        execFileSync("ssh-keygen", ["-t", SSH_KEY_TYPE.replace('ssh-', ''), "-C", keyId, "-N", "", "-f", keyPath, "-q"])
+
+        const privateKey = readFileSync(keyPath, "utf8")
+        const publicKeyLine = readFileSync(`${keyPath}.pub`, "utf8").trim()
+
+        readAuthorizedKeys()
+        sshKeys[keyId] = publicKeyLine.split(" ")[1]!
+        writeAuthorizedKeys()
+
+        res.header("Content-Type", "text/plain")
+        res.send(privateKey)
     }
-
-    res.header("Content-Type", "application/octet-stream")
-    createReadStream(sshKeyPath).pipe(res)
+    finally {
+        rmSync(keyPath, { force: true })
+        rmSync(`${keyPath}.pub`, { force: true })
+    }
 })
 
-import scriptsRouter, { scripts } from "./scripts/scripts"
-app.use("/scripts", scriptsRouter)
-
-const PORT = process.env.PORT || 3000
-
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`)
+app.listen(3000, () => {
+    console.log("Server is running on port 3000")
 })
