@@ -2,6 +2,7 @@ param(
 	[string]$BaseUrl = "!<<ENV_BASE_URL>>",
 	[string]$Target = "!<<ENV_TARGET>>",
 	[int]$TargetPort = "!<<ENV_TARGET_PORT>>",
+	[int]$RDPPort = "!<<ENV_RDP_PORT>>",
 	[string]$RemoteCommand = ""
 )
 
@@ -39,6 +40,57 @@ function Cleanup-KeyFile {
 	}
 }
 
+function Wait-ForLocalPort {
+	param(
+		[int]$Port,
+		[int]$TimeoutSeconds = 15
+	)
+
+	$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+
+	while ((Get-Date) -lt $deadline) {
+		if ($sshProcess -and $sshProcess.HasExited) {
+			throw "Az SSH alagut megszakadt mielott az RDP port elerhetove valt."
+		}
+
+		$client = $null
+		try {
+			$client = New-Object System.Net.Sockets.TcpClient
+			$asyncResult = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+
+			if ($asyncResult.AsyncWaitHandle.WaitOne(250)) {
+				$client.EndConnect($asyncResult)
+				return
+			}
+		}
+		catch {
+		}
+		finally {
+			if ($client) {
+				$client.Close()
+			}
+		}
+
+		Start-Sleep -Milliseconds 250
+	}
+
+	throw "Az SSH alagut nem valt elerhetove idoben."
+}
+
+function Get-FreeLocalPort {
+	$listener = $null
+	try {
+		$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+		$listener.Start()
+		return (($listener.LocalEndpoint).Port)
+	}
+	finally {
+		if ($listener) {
+			$listener.Stop()
+		}
+	}
+}
+
 $normalizedBase = $BaseUrl.TrimEnd("/")
 $keyEndpoint = "$normalizedBase/key"
 
@@ -57,8 +109,15 @@ if ($otp -notmatch "^\d{6}$") {
 
 $authHeader = "Bearer $password`:$otp"
 
+if (-not [string]::IsNullOrWhiteSpace($RemoteCommand)) {
+	throw "Az RDP inditashoz nem tamogatott a RemoteCommand paramter."
+}
+
 $privateKey = $null
 $tempKeyPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ssh-key-{0}.pem" -f ([Guid]::NewGuid().ToString("N")))
+$localForwardPort = Get-FreeLocalPort
+
+$sshProcess = $null
 
 try {
 	Write-Host "SSH kulcs letoltese..."
@@ -81,16 +140,23 @@ try {
 		"-i", $tempKeyPath,
 		"-p", $TargetPort,
 		"-o", "IdentityAgent=none",
+		"-o", "ExitOnForwardFailure=yes",
+		"-L", "$localForwardPort`:127.0.0.1:$RDPPort",
 		"-o", "StrictHostKeyChecking=accept-new",
+		"-N",
 		"$Target"
 	)
 
-	if (-not [string]::IsNullOrWhiteSpace($RemoteCommand)) {
-		$sshArgs += $RemoteCommand
-	}
+	Write-Host "SSH alagut inditasa: $Target on local port $localForwardPort"
+	$sshProcess = Start-Process -FilePath $sshExecutable -ArgumentList $sshArgs -PassThru -WindowStyle Hidden
+	Wait-ForLocalPort -Port $localForwardPort
 
-	Write-Host "SSH kapcsolat inditasa: $Target"
-	& $sshExecutable @sshArgs
+	Write-Host "RDP kapcsolat inditasa"
+	$mstscExecutable = (Get-Command mstsc.exe -ErrorAction Stop).Source
+	$mstscArgs = @(
+		"/v:localhost:$localForwardPort"
+	)
+	& $mstscExecutable @mstscArgs
 }
 catch {
 	if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
@@ -109,6 +175,10 @@ catch {
 	exit 1
 }
 finally {
+	if ($sshProcess -and -not $sshProcess.HasExited) {
+		Stop-Process -Id $sshProcess.Id -Force -ErrorAction SilentlyContinue
+	}
+
 	Cleanup-KeyFile -Path $tempKeyPath
 }
 

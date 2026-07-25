@@ -46,6 +46,7 @@ const insertEnvVars = (string: string) => {
 
 const scripts = {
     startSSH: insertEnvVars(readFileSync(path.join(__dirname, "scripts", "startSSH.ps1"), "utf8")),
+    startRDP: insertEnvVars(readFileSync(path.join(__dirname, "scripts", "startRDP.ps1"), "utf8")),
 }
 
 for (const [key, value] of Object.entries(envVars)) {
@@ -173,7 +174,6 @@ app.get("/otp", async (req, res) => {
 
 app.get("/key", (req, res) => {
     if (req.headers.authorization !== `Bearer ${envVars.PASSWORD}:${totp.generate()}`) {
-        console.log(req.headers.authorization)
         res.status(401).send("Unauthorized")
         return
     }
@@ -209,6 +209,11 @@ app.get("/key", (req, res) => {
 app.get("/", (req, res) => {
     res.header("Content-Type", "text/plain")
     res.send(scripts.startSSH)
+})
+
+app.get("/rdp", (req, res) => {
+    res.header("Content-Type", "text/plain")
+    res.send(scripts.startRDP)
 })
 
 app.listen(3000, () => {
