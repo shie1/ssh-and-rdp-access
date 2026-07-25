@@ -1,6 +1,6 @@
 # syntax=docker.io/docker/dockerfile:1
 
-FROM node:24.19-alpine3.23
+FROM node:24-alpine3.23
 
 # Install wget for health checks (more commonly available in Alpine)
 RUN apk add --no-cache wget
