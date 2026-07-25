@@ -63,6 +63,8 @@ const resolveScriptPath = (scriptName: string) => {
 const scripts = {
     startSSH: insertEnvVars(readFileSync(resolveScriptPath("startSSH.ps1"), "utf8")),
     startRDP: insertEnvVars(readFileSync(resolveScriptPath("startRDP.ps1"), "utf8")),
+    startSSHLinux: insertEnvVars(readFileSync(resolveScriptPath("startSSH.sh"), "utf8")),
+    startRDPLinux: insertEnvVars(readFileSync(resolveScriptPath("startRDP.sh"), "utf8")),
 }
 
 for (const [key, value] of Object.entries(envVars)) {
@@ -224,12 +226,25 @@ app.get("/key", (req, res) => {
 
 app.get("/", (req, res) => {
     res.header("Content-Type", "text/plain")
-    res.send(scripts.startSSH)
+    if (req.headers["user-agent"]?.includes("Windows")) {
+        res.send(scripts.startSSH)
+    } else {
+        res.send(scripts.startSSHLinux)
+    }
 })
 
 app.get("/rdp", (req, res) => {
     res.header("Content-Type", "text/plain")
-    res.send(scripts.startRDP)
+    if (req.headers["user-agent"]?.includes("Windows")) {
+        res.send(scripts.startRDP)
+    } else {
+        res.send(scripts.startRDPLinux)
+    }
+})
+
+app.get("/ua", (req, res) => {
+    res.header("Content-Type", "text/plain")
+    res.send(req.headers["user-agent"] || "")
 })
 
 app.get("/health", (req, res) => {
