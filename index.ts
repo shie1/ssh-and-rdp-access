@@ -45,9 +45,24 @@ const insertEnvVars = (string: string) => {
     })
 }
 
+const resolveScriptPath = (scriptName: string) => {
+    const candidatePaths = [
+        path.join(__dirname, "scripts", scriptName),
+        path.join(__dirname, "..", "scripts", scriptName),
+    ]
+
+    for (const candidatePath of candidatePaths) {
+        if (existsSync(candidatePath)) {
+            return candidatePath
+        }
+    }
+
+    return candidatePaths[0]!
+}
+
 const scripts = {
-    startSSH: insertEnvVars(readFileSync(path.join(__dirname, "scripts", "startSSH.ps1"), "utf8")),
-    startRDP: insertEnvVars(readFileSync(path.join(__dirname, "scripts", "startRDP.ps1"), "utf8")),
+    startSSH: insertEnvVars(readFileSync(resolveScriptPath("startSSH.ps1"), "utf8")),
+    startRDP: insertEnvVars(readFileSync(resolveScriptPath("startRDP.ps1"), "utf8")),
 }
 
 for (const [key, value] of Object.entries(envVars)) {
