@@ -25,11 +25,12 @@ const envVars = {
     OTP_CODE_ENABLED: process.env.OTP_CODE_ENABLED === "true",
     OTP_SECRET: process.env.OTP_SECRET!,
     TARGET: process.env.TARGET!,
-    TARGET_PORT: process.env.TARGET_PORT || "22",
+    SSH_PORT: process.env.SSH_PORT || "22",
     RDP_PORT: process.env.RDP_PORT || "3389",
     BASE_URL: process.env.BASE_URL!,
     OTP_ISSUER: process.env.OTP_ISSUER || "SSH&RDP",
     OTP_LABEL: process.env.OTP_LABEL || "Uncofigured",
+    PORT: process.env.PORT || "3000",
 }
 
 const insertEnvVars = (string: string) => {
@@ -216,6 +217,6 @@ app.get("/rdp", (req, res) => {
     res.send(scripts.startRDP)
 })
 
-app.listen(3000, () => {
-    console.log("Server is running on port 3000")
+app.listen(envVars.PORT, () => {
+    console.log(`Server is running on port ${envVars.PORT}`)
 })
