@@ -32,6 +32,22 @@ const envVars = {
     OTP_LABEL: process.env.OTP_LABEL || "Uncofigured",
 }
 
+const insertEnvVars = (string: string) => {
+    const regex = /!<<ENV_(\w+)>>/g
+    return string.replace(regex, (_, varName) => {
+        const value = envVars[varName as keyof typeof envVars]
+        if (value === undefined) {
+            console.error(`Environment variable ${varName} is not set.`)
+            process.exit(1)
+        }
+        return String(value)
+    })
+}
+
+const scripts = {
+    startSSH: insertEnvVars(readFileSync(path.join(__dirname, "scripts", "startSSH.ps1"), "utf8")),
+}
+
 for (const [key, value] of Object.entries(envVars)) {
     if (value === undefined || value === "") {
         console.error(`Environment variable ${key} is not set.`)
@@ -124,7 +140,7 @@ const clearKeys = () => {
     }
 }
 
-readAuthorizedKeys() 
+readAuthorizedKeys()
 clearKeys() // Clear all keys on startup to ensure a clean state
 writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
 
@@ -156,6 +172,12 @@ app.get("/otp", async (req, res) => {
 })
 
 app.get("/key", (req, res) => {
+    if (req.headers.authorization !== `Bearer ${envVars.PASSWORD}:${totp.generate()}`) {
+        console.log(req.headers.authorization)
+        res.status(401).send("Unauthorized")
+        return
+    }
+
     const tempDirectory = path.join(tmpdir(), "ssh-key-")
     const keyPath = `${tempDirectory}${Date.now()}`
 
@@ -173,11 +195,20 @@ app.get("/key", (req, res) => {
 
         res.header("Content-Type", "text/plain")
         res.send(privateKey)
+
+        setTimeout(() => {
+            deleteKey(keyId)
+        }, 30000) // Delete the key after 30 seconds
     }
     finally {
         rmSync(keyPath, { force: true })
         rmSync(`${keyPath}.pub`, { force: true })
     }
+})
+
+app.get("/", (req, res) => {
+    res.header("Content-Type", "text/plain")
+    res.send(scripts.startSSH)
 })
 
 app.listen(3000, () => {

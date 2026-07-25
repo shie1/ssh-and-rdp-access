@@ -1,7 +1,7 @@
 param(
-	[string]$BaseUrl = "<<ENV_BASE_URL>>",
-	[string]$Target = "<<ENV_TARGET>>",
-	[int]$TargetPort = "<<ENV_TARGET_PORT>>",
+	[string]$BaseUrl = "!<<ENV_BASE_URL>>",
+	[string]$Target = "!<<ENV_TARGET>>",
+	[int]$TargetPort = "!<<ENV_TARGET_PORT>>",
 	[string]$RemoteCommand = ""
 )
 
