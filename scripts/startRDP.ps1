@@ -118,6 +118,7 @@ $tempKeyPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ss
 $localForwardPort = Get-FreeLocalPort
 
 $sshProcess = $null
+$mstscProcess = $null
 
 try {
 	Write-Host "SSH kulcs letoltese..."
@@ -147,7 +148,7 @@ try {
 		"$Target"
 	)
 
-	Write-Host "SSH alagut inditasa: $Target on local port $localForwardPort"
+	Write-Host "SSH alagut inditasa: $Target on local port $localForwardPort to 127.0.0.1`:$RDPPort"
 	$sshProcess = Start-Process -FilePath $sshExecutable -ArgumentList $sshArgs -PassThru -WindowStyle Hidden
 	Wait-ForLocalPort -Port $localForwardPort
 
@@ -156,7 +157,8 @@ try {
 	$mstscArgs = @(
 		"/v:localhost:$localForwardPort"
 	)
-	& $mstscExecutable @mstscArgs
+	$mstscProcess = Start-Process -FilePath $mstscExecutable -ArgumentList $mstscArgs -PassThru
+	Wait-Process -Id $mstscProcess.Id
 }
 catch {
 	if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
@@ -175,6 +177,10 @@ catch {
 	exit 1
 }
 finally {
+	if ($mstscProcess -and -not $mstscProcess.HasExited) {
+		Stop-Process -Id $mstscProcess.Id -Force -ErrorAction SilentlyContinue
+	}
+
 	if ($sshProcess -and -not $sshProcess.HasExited) {
 		Stop-Process -Id $sshProcess.Id -Force -ErrorAction SilentlyContinue
 	}
