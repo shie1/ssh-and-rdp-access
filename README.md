@@ -31,16 +31,24 @@ The workflow is simple:
 Create a `.env` file in the project root.
 
 ```env
-SSH_KEY_PATH=~/.ssh/
-PASSWORD=your-password
-OTP_CODE_ENABLED=true
-OTP_SECRET=your-totp-secret
-OTP_ISSUER=SSH&RDP
-OTP_LABEL=Your Account
-TARGET=username@your-host.example.com
-TARGET_PORT=22
-RDP_PORT=3389
-BASE_URL=http://127.0.0.1:3000
+SSH_DIR=~/.ssh/ [optional, default=~/.ssh/]
+
+PASSWORD= [mandatory]
+
+OTP_LABEL=Uncofigured [optional, default=Unconfigured]
+OTP_ISSUER=SSH&RDP [optional, default=SSH&RDP]
+OTP_SECRET=RQWW3RBDFWLhg5KPDO7JZDIH5DVZMJBL2P [mandatory]
+OTP_CODE_ENABLED=true|false [optional, default=false]
+# for 2FA setup on first startup, set to true to view the QR code and generate the OTP secret, then set to false for normal operation
+
+TARGET=user@IP_ADDRESS [mandatory]
+
+SSH_PORT=22 [optional, default=22]
+RDP_PORT=3389 [optional, default=3389]
+
+PORT=3000 [optional, default=3000]
+BASE_URL=http://localhost:3000 [mandatory]
+# the base URL of the server, including the port number
 ```
 
 ### Environment variables
