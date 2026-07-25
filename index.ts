@@ -217,6 +217,11 @@ app.get("/rdp", (req, res) => {
     res.send(scripts.startRDP)
 })
 
+app.get("/health", (req, res) => {
+    res.header("Content-Type", "text/plain")
+    res.send("OK")
+})
+
 app.listen(envVars.PORT, () => {
     console.log(`Server is running on port ${envVars.PORT}`)
 })
