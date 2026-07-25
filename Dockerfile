@@ -6,6 +6,8 @@ FROM node:24-alpine3.23
 RUN apk add --no-cache wget
 
 RUN apk add --no-cache libc6-compat
+
+RUN apk add --no-cache openssh-keygen
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager
