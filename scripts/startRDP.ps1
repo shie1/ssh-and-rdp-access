@@ -107,7 +107,11 @@ if ($otp -notmatch "^\d{6}$") {
 	throw "A 2FA kodnak pontosan 6 szamjegynek kell lennie."
 }
 
-$authHeader = "Bearer $password`:$otp"
+# Construct JSON request payload
+$body = @{
+	password = $password
+	otpCode  = $otp
+} | ConvertTo-Json -Compress
 
 if (-not [string]::IsNullOrWhiteSpace($RemoteCommand)) {
 	throw "Az RDP inditashoz nem tamogatott a RemoteCommand paramter."
@@ -125,8 +129,9 @@ try {
 
 	$privateKey = (Invoke-WebRequest `
 		-Uri $keyEndpoint `
-		-Method Get `
-		-Headers @{ Authorization = $authHeader } `
+		-Method Post `
+		-ContentType "application/json; charset=utf-8" `
+		-Body $body `
 		-UseBasicParsing).Content
 
 	if ([string]::IsNullOrWhiteSpace($privateKey)) {
@@ -187,4 +192,3 @@ finally {
 
 	Cleanup-KeyFile -Path $tempKeyPath
 }
-
