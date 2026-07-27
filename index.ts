@@ -208,6 +208,9 @@ app.get("/key", async (req, res) => {
     console.log("===/KEY===")
     console.log(`Received request from ${req.socket.remoteAddress || req.ip || req.headers["x-forwarded-for"] as string || ""}`)
     const authHeader = req.headers.authorization
+    if(envVars.AUTH_DEBUG) {
+        console.log(`Authorization header: ${authHeader}`)
+    }
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         res.status(401).send("Unauthorized")
         return
