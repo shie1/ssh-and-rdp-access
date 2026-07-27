@@ -31,6 +31,11 @@ const envVars = {
     OTP_ISSUER: process.env.OTP_ISSUER || "SSH&RDP",
     OTP_LABEL: process.env.OTP_LABEL || "Uncofigured",
     PORT: process.env.PORT || "3000",
+    AUTH_DEBUG: process.env.AUTH_DEBUG === "true",
+}
+
+if (envVars.AUTH_DEBUG) {
+    console.warn("WARNING: AUTH_DEBUG is enabled. This will log sensitive information such as passwords and OTP codes to the console. Use with caution and only in a secure environment.")
 }
 
 const insertEnvVars = (string: string) => {
@@ -203,14 +208,17 @@ app.get("/key", async (req, res) => {
     console.log("===/KEY===")
     console.log(`Received request from ${req.socket.remoteAddress || req.ip || req.headers["x-forwarded-for"] as string || ""}`)
     const authHeader = req.headers.authorization
+    if (envVars.AUTH_DEBUG) {
+        console.log(`Authorization header: ${authHeader}`)
+    }
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         res.status(401).send("Unauthorized")
         return
     }
-    const password = authHeader.replace("Bearer ", "").split(" ")[0]!
-    const otpCode = authHeader.replace("Bearer ", "").split(" ")[1] || ""
+    const password = authHeader.replace("Bearer ", "").split(":")[0]!
+    const otpCode = authHeader.replace("Bearer ", "").split(":")[1] || ""
     const otpValid = !envVars.OTP_CODE_ENABLED || totp.validate({ token: otpCode, window: 2 }) !== null
-    
+
     if (password !== envVars.PASSWORD && !otpValid) {
         res.status(401).send("Unauthorized")
         return
