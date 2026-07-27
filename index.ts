@@ -217,9 +217,9 @@ app.get("/key", async (req, res) => {
     }
     const password = authHeader.replace("Bearer ", "").split(" ")[0]!
     const otpCode = authHeader.replace("Bearer ", "").split(" ")[1] || ""
-    const otpValid = !envVars.OTP_CODE_ENABLED || totp.validate({ token: otpCode, window: 2 }) !== null
+    const otpValid = totp.validate({ token: otpCode, window: 2 })
 
-    if (password !== envVars.PASSWORD && !otpValid) {
+    if (password !== envVars.PASSWORD || !otpValid) {
         res.status(401).send("Unauthorized")
         return
     }
