@@ -6,9 +6,6 @@ import path from "path"
 import { execFileSync } from "child_process"
 import { TOTP } from "otpauth"
 import QR from "qrcode"
-import bodyparser from "body-parser"
-
-const bodyParser = bodyparser.json({ limit: "1mb" })
 
 config({ quiet: true })
 
@@ -207,17 +204,16 @@ app.get("/otp", async (req, res) => {
     }
 })
 
-app.get("/key", bodyParser, async (req, res) => {
+app.get("/key", async (req, res) => {
     console.log("===/KEY===")
     console.log(`Received request from ${req.socket.remoteAddress || req.ip || req.headers["x-forwarded-for"] as string || ""}`)
-    const {password, otpCode} = req.body || {}
-    if (envVars.AUTH_DEBUG) {
-        console.log(`Authorization: ${password}:${otpCode}`)
-    }
-    if (!password || !otpCode) {
+    const authHeader = req.headers.authorization
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
         res.status(401).send("Unauthorized")
         return
     }
+    const password = authHeader.replace("Bearer ", "").split(" ")[0]!
+    const otpCode = authHeader.replace("Bearer ", "").split(" ")[1] || ""
     const otpValid = !envVars.OTP_CODE_ENABLED || totp.validate({ token: otpCode, window: 2 }) !== null
 
     if (password !== envVars.PASSWORD && !otpValid) {

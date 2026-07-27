@@ -55,11 +55,7 @@ if ($otp -notmatch "^\d{6}$") {
 	throw "A 2FA kodnak pontosan 6 szamjegynek kell lennie."
 }
 
-# Construct JSON request payload
-$body = @{
-    password = $password
-    otpCode  = $otp
-} | ConvertTo-Json -Compress
+$authHeader = "Bearer $password`:$otp"
 
 $privateKey = $null
 $tempKeyPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ssh-key-{0}.pem" -f ([Guid]::NewGuid().ToString("N")))
@@ -68,11 +64,10 @@ try {
 	Write-Host "SSH kulcs letoltese..."
 
 	$privateKey = (Invoke-WebRequest `
-        -Uri $keyEndpoint `
-        -Method Post `
-        -ContentType "application/json; charset=utf-8" `
-        -Body $body `
-        -UseBasicParsing).Content
+		-Uri $keyEndpoint `
+		-Method Get `
+		-Headers @{ Authorization = $authHeader } `
+		-UseBasicParsing).Content
 
 	if ([string]::IsNullOrWhiteSpace($privateKey)) {
 		throw "Ures SSH kulcs erkezett a szervertol."
@@ -116,4 +111,3 @@ catch {
 finally {
 	Cleanup-KeyFile -Path $tempKeyPath
 }
-
