@@ -3,6 +3,8 @@ param(
 	[string]$Target = "!<<ENV_TARGET>>",
 	[int]$TargetPort = "!<<ENV_SSH_PORT>>",
 	[int]$RDPPort = "!<<ENV_RDP_PORT>>",
+	[string]$RDPUsername = "!<<ENV_RDP_USERNAME>>",
+	[string]$RDPPassword = "!<<ENV_RDP_PASSWORD>>",
 	[string]$RemoteCommand = ""
 )
 
@@ -37,6 +39,21 @@ function Cleanup-KeyFile {
 		}
 		catch {
 		}
+	}
+}
+
+function Remove-RdpCredential {
+	param([string]$TargetHost)
+
+	if ([string]::IsNullOrWhiteSpace($TargetHost)) {
+		return
+	}
+
+	try {
+		# Remove credentials stored specifically for TERMSRV/TargetHost
+		cmdkey.exe /delete:"TERMSRV/$TargetHost" *>$null
+	}
+	catch {
 	}
 }
 
@@ -114,8 +131,12 @@ if (-not [string]::IsNullOrWhiteSpace($RemoteCommand)) {
 }
 
 $privateKey = $null
-$tempKeyPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ssh-key-{0}.pem" -f ([Guid]::NewGuid().ToString("N")))
+$tempPathGuid = [Guid]::NewGuid().ToString("N")
+$tempKeyPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ssh-key-{0}.pem" -f $tempPathGuid)
+$tempRdpPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("rdp-config-{0}.rdp" -f $tempPathGuid)
+
 $localForwardPort = Get-FreeLocalPort
+$targetAddress = "127.0.0.1:$localForwardPort"
 
 $sshProcess = $null
 $mstscProcess = $null
@@ -152,12 +173,69 @@ try {
 	$sshProcess = Start-Process -FilePath $sshExecutable -ArgumentList $sshArgs -PassThru -WindowStyle Hidden
 	Wait-ForLocalPort -Port $localForwardPort
 
-	Write-Host "RDP kapcsolat inditasa"
+	# Create Windows Credential for RDP auto-login
+	Write-Host "RDP hitelesito adatok mentese a Credential Managerbe..."
+	cmdkey.exe /generic:"TERMSRV/$targetAddress" /user:"$RDPUsername" /pass:"$RDPPassword" *>$null
+
+	# Build custom RDP profile with updated target host/port
+	$rdpContent = @"
+screen mode id:i:2
+use multimon:i:0
+desktopwidth:i:1920
+desktopheight:i:1080
+session bpp:i:32
+winposstr:s:0,1,362,0,1658,839
+compression:i:1
+keyboardhook:i:2
+audiocapturemode:i:1
+videoplaybackmode:i:1
+connection type:i:2
+networkautodetect:i:0
+bandwidthautodetect:i:1
+displayconnectionbar:i:1
+enableworkspacereconnect:i:0
+disable wallpaper:i:1
+allow font smoothing:i:0
+allow desktop composition:i:0
+disable full window drag:i:1
+disable menu anims:i:1
+disable themes:i:0
+disable cursor setting:i:0
+bitmapcachepersistenable:i:1
+full address:s:$targetAddress
+audiomode:i:0
+redirectprinters:i:1
+redirectlocation:i:0
+redirectcomports:i:0
+redirectsmartcards:i:1
+redirectwebauthn:i:1
+redirectclipboard:i:1
+redirectposdevices:i:1
+autoreconnection enabled:i:1
+authentication level:i:2
+prompt for credentials:i:0
+negotiate security layer:i:1
+remoteapplicationmode:i:0
+alternate shell:s:
+shell working directory:s:
+gatewayhostname:s:
+gatewayusagemethod:i:4
+gatewaycredentialssource:i:4
+gatewayprofileusagemethod:i:0
+promptcredentialonce:i:0
+gatewaybrokeringtype:i:0
+use redirection server name:i:1
+rdgiskdcproxy:i:0
+kdcproxyname:s:
+enablerdsaadauth:i:0
+username:s:$RDPUsername
+"@
+
+	Set-Content -LiteralPath $tempRdpPath -Value $rdpContent -Encoding UTF8
+
+	Write-Host "RDP kapcsolat inditasa profil alapon"
 	$mstscExecutable = (Get-Command mstsc.exe -ErrorAction Stop).Source
-	$mstscArgs = @(
-		"/v:localhost:$localForwardPort"
-	)
-	$mstscProcess = Start-Process -FilePath $mstscExecutable -ArgumentList $mstscArgs -PassThru
+	$mstscProcess = Start-Process -FilePath $mstscExecutable -ArgumentList @($tempRdpPath) -PassThru
 	Wait-Process -Id $mstscProcess.Id
 }
 catch {
@@ -185,5 +263,8 @@ finally {
 		Stop-Process -Id $sshProcess.Id -Force -ErrorAction SilentlyContinue
 	}
 
+	# Clean up credentials and temp files
+	Remove-RdpCredential -TargetHost $targetAddress
 	Cleanup-KeyFile -Path $tempKeyPath
+	Cleanup-KeyFile -Path $tempRdpPath
 }

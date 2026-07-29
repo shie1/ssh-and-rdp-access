@@ -32,6 +32,13 @@ const envVars = {
     OTP_LABEL: process.env.OTP_LABEL || "Uncofigured",
     PORT: process.env.PORT || "3000",
     AUTH_DEBUG: process.env.AUTH_DEBUG === "true",
+    RDP_USERNAME: process.env.RDP_USERNAME!,
+    RDP_PASSWORD: process.env.RDP_PASSWORD!,
+}
+
+if(!envVars.RDP_USERNAME || !envVars.RDP_PASSWORD) {
+    console.error("RDP_USERNAME and RDP_PASSWORD environment variables must be set.")
+    process.exit(1)
 }
 
 if (envVars.AUTH_DEBUG) {
