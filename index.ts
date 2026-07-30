@@ -45,11 +45,6 @@ const redisClient = createClient({
 
 redisClient.on("error", (err) => {
     console.error("Redis Client Error", err)
-    process.exit(1)
-})
-
-redisClient.connect().then(() => {
-    console.log("Connected to Redis server")
 })
 
 if (envVars.AUTH_DEBUG) {
@@ -182,10 +177,6 @@ const clearKeys = () => {
     }
 }
 
-readAuthorizedKeys()
-clearKeys() // Clear all keys on startup to ensure a clean state
-writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
-
 
 const getIP = (req: express.Request) => {
     return req.ip || "unknown";
@@ -211,119 +202,132 @@ const totp = new TOTP({
 
 const app = express()
 
-app.set('trust proxy', envVars.TRUST_PROXY);
+const main = async () => {
+    await redisClient.connect()
 
-app.get("/otp", async (req, res) => {
-    if (!envVars.OTP_CODE_ENABLED) {
-        res.status(403).send("OTP code generation is disabled.")
-        return
-    }
+    app.set('trust proxy', envVars.TRUST_PROXY);
 
-    if (req.query.format == "url" || req.query.f == "url") {
-        res.header("Content-Type", "text/plain")
-        res.send(totp.toString())
-    } else {
-        res.header("Content-Type", "image/svg+xml")
-        res.send((await QR.toString(totp.toString(), { type: "svg" })).toString())
-    }
-})
+    readAuthorizedKeys()
+    clearKeys() // Clear all keys on startup to ensure a clean state
+    writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
 
-app.get("/otp/state", async (req, res) => {
-    res.header("Content-Type", "text/plain")
-    const validated = await redisClient.get(`otp_validated:${getIP(req)}`)
-    res.send(validated === "true" ? "validated" : "not validated")
-})
-
-app.get("/key", async (req, res) => {
-    console.log("===/KEY===")
-    console.log(`Received request from ${getIP(req)}`)
-    const validated = await redisClient.get(`otp_validated:${getIP(req)}`)
-    console.log(`OTP validated state for ${getIP(req)}: ${validated}`)
-    const authHeader = req.headers.authorization
-    if (envVars.AUTH_DEBUG) {
-        console.log(`Authorization header: ${authHeader}`)
-    }
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        res.status(401).send("Unauthorized")
-        return
-    }
-    const password = authHeader.replace("Bearer ", "").split(":")[0]!
-    let otpCode = ""
-    let otpValid = false
-    if (!validated) {
-        otpCode = authHeader.replace("Bearer ", "").split(":")[1] || ""
-        console.log(`Password: ${password}, OTP Code: ${otpCode}`)
-        otpValid = totp.validate({ token: otpCode, window: 1 }) !== null
-        console.log(otpValid ? "OTP code is valid." : "OTP code is invalid.")
-    } else {
-        otpValid = true
-    }
-
-    if (password !== envVars.PASSWORD || !otpValid) {
-        res.status(401).send("Unauthorized")
-        return
-    }
-
-    const tempDirectory = path.join(tmpdir(), "ssh-key-")
-    const keyPath = `${tempDirectory}${Date.now()}`
-
-    const keyId = createKeyId(getIP(req))
-
-    try {
-        execFileSync("ssh-keygen", ["-t", SSH_KEY_TYPE.replace('ssh-', ''), "-C", keyId, "-N", "", "-f", keyPath, "-q"])
-
-        const privateKey = readFileSync(keyPath, "utf8")
-        const publicKeyLine = readFileSync(`${keyPath}.pub`, "utf8").trim()
-
-        readAuthorizedKeys()
-        sshKeys[keyId] = publicKeyLine.split(" ")[1]!
-        writeAuthorizedKeys()
-
-        const ip = getIP(req)
-        if (ip !== "unknown") {
-            await redisClient.set(`otp_validated:${ip}`, "true", { EX: envVars.IP_VALIDATION_SECONDS }) // Set OTP validated state for the specified number of seconds
+    app.get("/otp", async (req, res) => {
+        if (!envVars.OTP_CODE_ENABLED) {
+            res.status(403).send("OTP code generation is disabled.")
+            return
         }
+
+        if (req.query.format == "url" || req.query.f == "url") {
+            res.header("Content-Type", "text/plain")
+            res.send(totp.toString())
+        } else {
+            res.header("Content-Type", "image/svg+xml")
+            res.send((await QR.toString(totp.toString(), { type: "svg" })).toString())
+        }
+    })
+
+    app.get("/otp/state", async (req, res) => {
         res.header("Content-Type", "text/plain")
-        res.send(privateKey)
+        const validated = await redisClient.get(`otp_validated:${getIP(req)}`)
+        res.send(validated === "true" ? "validated" : "not validated")
+    })
 
-        setTimeout(() => {
-            deleteKey(keyId)
-        }, 30000) // Delete the key after 30 seconds
-    }
-    finally {
-        rmSync(keyPath, { force: true })
-        rmSync(`${keyPath}.pub`, { force: true })
-    }
-})
+    app.get("/key", async (req, res) => {
+        console.log("===/KEY===")
+        console.log(`Received request from ${getIP(req)}`)
+        const validated = await redisClient.get(`otp_validated:${getIP(req)}`)
+        console.log(`OTP validated state for ${getIP(req)}: ${validated}`)
+        const authHeader = req.headers.authorization
+        if (envVars.AUTH_DEBUG) {
+            console.log(`Authorization header: ${authHeader}`)
+        }
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            res.status(401).send("Unauthorized")
+            return
+        }
+        const password = authHeader.replace("Bearer ", "").split(":")[0]!
+        let otpCode = ""
+        let otpValid = false
+        if (!validated) {
+            otpCode = authHeader.replace("Bearer ", "").split(":")[1] || ""
+            console.log(`Password: ${password}, OTP Code: ${otpCode}`)
+            otpValid = totp.validate({ token: otpCode, window: 1 }) !== null
+            console.log(otpValid ? "OTP code is valid." : "OTP code is invalid.")
+        } else {
+            otpValid = true
+        }
 
-app.get("/", (req, res) => {
-    res.header("Content-Type", "text/plain")
-    if (req.headers["user-agent"]?.includes("Windows")) {
-        res.send(scripts.startSSH)
-    } else {
-        res.send(scripts.startSSHLinux)
-    }
-})
+        if (password !== envVars.PASSWORD || !otpValid) {
+            res.status(401).send("Unauthorized")
+            return
+        }
 
-app.get("/rdp", (req, res) => {
-    res.header("Content-Type", "text/plain")
-    if (req.headers["user-agent"]?.includes("Windows")) {
-        res.send(scripts.startRDP)
-    } else {
-        res.send(scripts.startRDPLinux)
-    }
-})
+        const tempDirectory = path.join(tmpdir(), "ssh-key-")
+        const keyPath = `${tempDirectory}${Date.now()}`
 
-app.get("/ua", (req, res) => {
-    res.header("Content-Type", "text/plain")
-    res.send(req.headers["user-agent"] || "")
-})
+        const keyId = createKeyId(getIP(req))
 
-app.get("/health", (req, res) => {
-    res.header("Content-Type", "text/plain")
-    res.send("OK")
-})
+        try {
+            execFileSync("ssh-keygen", ["-t", SSH_KEY_TYPE.replace('ssh-', ''), "-C", keyId, "-N", "", "-f", keyPath, "-q"])
 
-app.listen(envVars.PORT, () => {
-    console.log(`Server is running on port ${envVars.PORT}`)
+            const privateKey = readFileSync(keyPath, "utf8")
+            const publicKeyLine = readFileSync(`${keyPath}.pub`, "utf8").trim()
+
+            readAuthorizedKeys()
+            sshKeys[keyId] = publicKeyLine.split(" ")[1]!
+            writeAuthorizedKeys()
+
+            const ip = getIP(req)
+            if (ip !== "unknown") {
+                await redisClient.set(`otp_validated:${ip}`, "true", { EX: envVars.IP_VALIDATION_SECONDS }) // Set OTP validated state for the specified number of seconds
+            }
+            res.header("Content-Type", "text/plain")
+            res.send(privateKey)
+
+            setTimeout(() => {
+                deleteKey(keyId)
+            }, 30000) // Delete the key after 30 seconds
+        }
+        finally {
+            rmSync(keyPath, { force: true })
+            rmSync(`${keyPath}.pub`, { force: true })
+        }
+    })
+
+    app.get("/", (req, res) => {
+        res.header("Content-Type", "text/plain")
+        if (req.headers["user-agent"]?.includes("Windows")) {
+            res.send(scripts.startSSH)
+        } else {
+            res.send(scripts.startSSHLinux)
+        }
+    })
+
+    app.get("/rdp", (req, res) => {
+        res.header("Content-Type", "text/plain")
+        if (req.headers["user-agent"]?.includes("Windows")) {
+            res.send(scripts.startRDP)
+        } else {
+            res.send(scripts.startRDPLinux)
+        }
+    })
+
+    app.get("/ua", (req, res) => {
+        res.header("Content-Type", "text/plain")
+        res.send(req.headers["user-agent"] || "")
+    })
+
+    app.get("/health", (req, res) => {
+        res.header("Content-Type", "text/plain")
+        res.send("OK")
+    })
+
+    app.listen(envVars.PORT, () => {
+        console.log(`Server is running on port ${envVars.PORT}`)
+    })
+}
+
+main().catch(err => {
+    console.error(err)
+    process.exit(1)
 })
