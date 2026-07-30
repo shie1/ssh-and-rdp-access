@@ -17,7 +17,8 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.0",
     "otpauth": "^9.5.1",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "redis": "^6.1.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

@@ -6,6 +6,7 @@ import path from "path"
 import { execFileSync } from "child_process"
 import { TOTP } from "otpauth"
 import QR from "qrcode"
+import { createClient } from "redis"
 
 config({ quiet: true })
 
@@ -33,13 +34,23 @@ const envVars = {
     PORT: process.env.PORT || "3000",
     AUTH_DEBUG: process.env.AUTH_DEBUG === "true",
     RDP_USERNAME: process.env.RDP_USERNAME!,
-    RDP_PASSWORD: process.env.RDP_PASSWORD!,
+    REDIS_HOST: process.env.REDIS_HOST || "127.0.0.1:6379",
+    IP_VALIDATION_SECONDS: parseInt(process.env.IP_VALIDATION_SECONDS || "600", 10),
+    TRUST_PROXY: process.env.TRUST_PROXY === "true" ? true : (process.env.TRUST_PROXY === "false" ? false : (isNaN(Number(process.env.TRUST_PROXY)) ? false : Number(process.env.TRUST_PROXY))),
 }
 
-if(!envVars.RDP_USERNAME || !envVars.RDP_PASSWORD) {
-    console.error("RDP_USERNAME and RDP_PASSWORD environment variables must be set.")
+const redisClient = createClient({
+    url: `redis://${envVars.REDIS_HOST}`,
+})
+
+redisClient.on("error", (err) => {
+    console.error("Redis Client Error", err)
     process.exit(1)
-}
+})
+
+redisClient.connect().then(() => {
+    console.log("Connected to Redis server")
+})
 
 if (envVars.AUTH_DEBUG) {
     console.warn("WARNING: AUTH_DEBUG is enabled. This will log sensitive information such as passwords and OTP codes to the console. Use with caution and only in a secure environment.")
@@ -177,7 +188,7 @@ writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
 
 
 const getIP = (req: express.Request) => {
-    return req.headers["x-real-ip"] as string || req.headers["x-forwarded-for"] as string || ""
+    return req.ip || "unknown";
 }
 
 const createKeyId = (ip: string) => {
@@ -200,6 +211,8 @@ const totp = new TOTP({
 
 const app = express()
 
+app.set('trust proxy', envVars.TRUST_PROXY);
+
 app.get("/otp", async (req, res) => {
     if (!envVars.OTP_CODE_ENABLED) {
         res.status(403).send("OTP code generation is disabled.")
@@ -215,11 +228,19 @@ app.get("/otp", async (req, res) => {
     }
 })
 
+app.get("/otp/state", async (req, res) => {
+    res.header("Content-Type", "text/plain")
+    const validated = await redisClient.get(`otp_validated:${getIP(req)}`)
+    res.send(validated === "true" ? "validated" : "not validated")
+})
+
 app.get("/key", async (req, res) => {
     console.log("===/KEY===")
     console.log(`Received request from ${getIP(req)}`)
+    const validated = await redisClient.get(`otp_validated:${getIP(req)}`)
+    console.log(`OTP validated state for ${getIP(req)}: ${validated}`)
     const authHeader = req.headers.authorization
-    if(envVars.AUTH_DEBUG) {
+    if (envVars.AUTH_DEBUG) {
         console.log(`Authorization header: ${authHeader}`)
     }
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -227,10 +248,16 @@ app.get("/key", async (req, res) => {
         return
     }
     const password = authHeader.replace("Bearer ", "").split(":")[0]!
-    const otpCode = authHeader.replace("Bearer ", "").split(":")[1] || ""
-    console.log(`Password: ${password}, OTP Code: ${otpCode}`)
-    const otpValid = totp.validate({ token: otpCode, window: 1 }) !== null
-    console.log(otpValid ? "OTP code is valid." : "OTP code is invalid.")
+    let otpCode = ""
+    let otpValid = false
+    if (!validated) {
+        otpCode = authHeader.replace("Bearer ", "").split(":")[1] || ""
+        console.log(`Password: ${password}, OTP Code: ${otpCode}`)
+        otpValid = totp.validate({ token: otpCode, window: 1 }) !== null
+        console.log(otpValid ? "OTP code is valid." : "OTP code is invalid.")
+    } else {
+        otpValid = true
+    }
 
     if (password !== envVars.PASSWORD || !otpValid) {
         res.status(401).send("Unauthorized")
@@ -252,6 +279,10 @@ app.get("/key", async (req, res) => {
         sshKeys[keyId] = publicKeyLine.split(" ")[1]!
         writeAuthorizedKeys()
 
+        const ip = getIP(req)
+        if (ip !== "unknown") {
+            await redisClient.set(`otp_validated:${ip}`, "true", { EX: envVars.IP_VALIDATION_SECONDS }) // Set OTP validated state for the specified number of seconds
+        }
         res.header("Content-Type", "text/plain")
         res.send(privateKey)
 

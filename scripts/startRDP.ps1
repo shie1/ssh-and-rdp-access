@@ -4,7 +4,6 @@ param(
 	[int]$TargetPort = "!<<ENV_SSH_PORT>>",
 	[int]$RDPPort = "!<<ENV_RDP_PORT>>",
 	[string]$RDPUsername = "!<<ENV_RDP_USERNAME>>",
-	[string]$RDPPassword = "!<<ENV_RDP_PASSWORD>>",
 	[string]$RemoteCommand = ""
 )
 
@@ -39,21 +38,6 @@ function Cleanup-KeyFile {
 		}
 		catch {
 		}
-	}
-}
-
-function Remove-RdpCredential {
-	param([string]$TargetHost)
-
-	if ([string]::IsNullOrWhiteSpace($TargetHost)) {
-		return
-	}
-
-	try {
-		# Remove credentials stored specifically for TERMSRV/TargetHost
-		cmdkey.exe /delete:"TERMSRV/$TargetHost" *>$null
-	}
-	catch {
 	}
 }
 
@@ -173,10 +157,6 @@ try {
 	$sshProcess = Start-Process -FilePath $sshExecutable -ArgumentList $sshArgs -PassThru -WindowStyle Hidden
 	Wait-ForLocalPort -Port $localForwardPort
 
-	# Create Windows Credential for RDP auto-login
-	Write-Host "RDP hitelesito adatok mentese a Credential Managerbe..."
-	cmdkey.exe /generic:"TERMSRV/$targetAddress" /user:"$RDPUsername" /pass:"$RDPPassword" *>$null
-
 	# Build custom RDP profile with updated target host/port
 	$rdpContent = @"
 screen mode id:i:2
@@ -264,7 +244,6 @@ finally {
 	}
 
 	# Clean up credentials and temp files
-	Remove-RdpCredential -TargetHost $targetAddress
 	Cleanup-KeyFile -Path $tempKeyPath
 	Cleanup-KeyFile -Path $tempRdpPath
 }
