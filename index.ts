@@ -39,14 +39,6 @@ const envVars = {
     TRUST_PROXY: process.env.TRUST_PROXY === "true" ? true : (process.env.TRUST_PROXY === "false" ? false : (isNaN(Number(process.env.TRUST_PROXY)) ? false : Number(process.env.TRUST_PROXY))),
 }
 
-const redisClient = createClient({
-    url: `redis://${envVars.REDIS_HOST}`,
-})
-
-redisClient.on("error", (err) => {
-    console.error("Redis Client Error", err)
-})
-
 if (envVars.AUTH_DEBUG) {
     console.warn("WARNING: AUTH_DEBUG is enabled. This will log sensitive information such as passwords and OTP codes to the console. Use with caution and only in a secure environment.")
 }
@@ -203,7 +195,21 @@ const totp = new TOTP({
 const app = express()
 
 const main = async () => {
-    await redisClient.connect()
+    const redisClient = createClient({
+        url: `redis://${envVars.REDIS_HOST}`,
+    })
+
+    redisClient.on("error", (err) => {
+        console.error("Redis Client Error", err)
+    })
+
+    try {
+        await redisClient.connect()
+        console.log("Connected to Redis server.")
+    } catch (err) {
+        console.error("Failed to connect to Redis on startup:", err)
+        process.exit(1)
+    }
 
     app.set('trust proxy', envVars.TRUST_PROXY);
 
@@ -328,6 +334,6 @@ const main = async () => {
 }
 
 main().catch(err => {
-    console.error(err)
+    console.error("Unhandled error:", err)
     process.exit(1)
 })
