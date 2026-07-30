@@ -176,6 +176,10 @@ clearKeys() // Clear all keys on startup to ensure a clean state
 writeAuthorizedKeys() // Write the cleared state to the authorized_keys file
 
 
+const getIP = (req: express.Request) => {
+    return req.headers["x-real-ip"] as string || req.headers["x-forwarded-for"] as string || ""
+}
+
 const createKeyId = (ip: string) => {
     if (!ip) {
         ip = "unknown"
@@ -213,7 +217,7 @@ app.get("/otp", async (req, res) => {
 
 app.get("/key", async (req, res) => {
     console.log("===/KEY===")
-    console.log(`Received request from ${req.socket.remoteAddress || req.ip || req.headers["x-forwarded-for"] as string || ""}`)
+    console.log(`Received request from ${getIP(req)}`)
     const authHeader = req.headers.authorization
     if(envVars.AUTH_DEBUG) {
         console.log(`Authorization header: ${authHeader}`)
@@ -236,7 +240,7 @@ app.get("/key", async (req, res) => {
     const tempDirectory = path.join(tmpdir(), "ssh-key-")
     const keyPath = `${tempDirectory}${Date.now()}`
 
-    const keyId = createKeyId(req.socket.remoteAddress || req.ip || req.headers["x-forwarded-for"] as string || "")
+    const keyId = createKeyId(getIP(req))
 
     try {
         execFileSync("ssh-keygen", ["-t", SSH_KEY_TYPE.replace('ssh-', ''), "-C", keyId, "-N", "", "-f", keyPath, "-q"])
