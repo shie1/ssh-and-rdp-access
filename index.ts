@@ -238,6 +238,16 @@ const main = async () => {
         res.send(validated === "true" ? "validated" : "not validated")
     })
 
+    app.get("/ip", (req, res) => {
+        res.header("Content-Type", "application/json")
+        res.send({
+            forwardedFor: req.headers["x-forwarded-for"] || null,
+            ipFunction: getIP(req),
+            remoteAddress: req.socket.remoteAddress || null,
+            xRealIp: req.headers["x-real-ip"] || null
+        })
+    })
+
     app.get("/key", async (req, res) => {
         console.log("===/KEY===")
         console.log(`Received request from ${getIP(req)}`)
