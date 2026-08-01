@@ -37,6 +37,19 @@ const envVars = {
     REDIS_HOST: process.env.REDIS_HOST || "127.0.0.1:6379",
     IP_VALIDATION_SECONDS: parseInt(process.env.IP_VALIDATION_SECONDS || "600", 10),
     TRUST_PROXY: process.env.TRUST_PROXY === "true" ? true : (process.env.TRUST_PROXY === "false" ? false : (isNaN(Number(process.env.TRUST_PROXY)) ? false : Number(process.env.TRUST_PROXY))),
+    SSH_KEY_VALIDATION_SECONDS: parseInt(process.env.SSH_KEY_VALIDATION_SECONDS || "30", 10),
+    ENABLE_IP_ENDPOINT: process.env.ENABLE_IP_ENDPOINT === "true",
+}
+
+if(envVars.ENABLE_IP_ENDPOINT) {
+    console.warn("WARNING: /ip endpoint is enabled. This may expose the server to potential abuse or information leakage. Use with caution and only in a secure environment.")
+}
+
+if (envVars.SSH_KEY_VALIDATION_SECONDS < 1) {
+    console.error("SSH_KEY_VALIDATION_SECONDS must be at least 1 second.")
+    process.exit(1)
+} else if (envVars.SSH_KEY_VALIDATION_SECONDS < 10) {
+    console.warn("WARNING: SSH_KEY_VALIDATION_SECONDS is set to a very low value. The key may expire before the client can use it. Consider increasing this value to at least 10 seconds.")
 }
 
 if (envVars.AUTH_DEBUG) {
@@ -171,10 +184,13 @@ const clearKeys = () => {
 
 
 const getIP = (req: express.Request) => {
-    return req.ip || "unknown";
+    if (!req.headers["x-real-ip"]) {
+        console.warn("Warning: x-real-ip header is not set. This breaks IP validation features and rate limiting. Ensure that your reverse proxy is configured to set this header.")
+    }
+    return req.headers["x-real-ip"] as string || null;
 }
 
-const createKeyId = (ip: string) => {
+const createKeyId = (ip: string | null) => {
     if (!ip) {
         ip = "unknown"
     }
@@ -294,7 +310,7 @@ const main = async () => {
             writeAuthorizedKeys()
 
             const ip = getIP(req)
-            if (ip !== "unknown") {
+            if (ip !== null && envVars.IP_VALIDATION_SECONDS > 0) {
                 await redisClient.set(`otp_validated:${ip}`, "true", { EX: envVars.IP_VALIDATION_SECONDS }) // Set OTP validated state for the specified number of seconds
             }
             res.header("Content-Type", "text/plain")
